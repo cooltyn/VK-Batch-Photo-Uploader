@@ -1,4 +1,4 @@
 # VK Batch Photo Uploader
-Upload photos to VK without limit by quantity
+Upload photos to VK without limit by quantity.
 
-Any questions or feedbacks? Telegram <a href="tg://resolve?domain=<cooltyn>">@cooltyn</a>
+Any questions or feedbacks? Telegram @cooltyn
