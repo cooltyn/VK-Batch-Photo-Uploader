@@ -18,7 +18,12 @@ def encode(text):
     return base64.b64encode(cipher.encrypt(text.rjust(32)))
 
 def decode(text):
-    return cipher.decrypt(base64.b64decode(text)).strip()
+    try:
+        decoded_text = cipher.decrypt(base64.b64decode(text)).strip()
+    except BaseException as e:
+        return text
+    else:
+        return decoded_text
 
 def check_login_file():
     if Path(login_file).is_file():
