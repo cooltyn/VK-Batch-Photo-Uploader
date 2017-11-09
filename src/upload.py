@@ -2,7 +2,7 @@
 
 import wx
 import vk_api
-import json, os, datetime, tempfile, base64, time, threading, sys
+import json, os, datetime, tempfile, base64, time, threading, sys, codecs
 from pathlib import Path
 from Crypto.Cipher import AES
 from AScrolledWindow import AScrolledWindow
@@ -21,6 +21,15 @@ def decode(text):
         return text
     else:
         return decoded_text
+
+def startDaemon(func, args):
+    thread = threading.Thread(target=func, args=args)
+    thread.daemon = True
+    thread.start()
+    return thread
+
+def pretty_time(timestamp):
+    return datetime.datetime.fromtimestamp(timestamp).strftime('%d.%m.%Y %H:%M')
 
 class Frame(wx.Frame):
 
@@ -41,6 +50,7 @@ class Frame(wx.Frame):
         self.album_id = False
         self.files = []
         self.loading = False
+        self.groups = {'items':[]}
 
         self.makeMenuBar()
         self.CreateStatusBar()
@@ -140,10 +150,17 @@ class Frame(wx.Frame):
         self.try_to_login({'login': login, 'password': password})
         
     def OnAbout(self, event):
-        wx.MessageBox('VK Batch Photo Uploader 0.4 by cooltyn', ' ', wx.OK|wx.ICON_INFORMATION)
+        wx.MessageBox('VK Batch Photo Uploader 0.41 by cooltyn', ' ', wx.OK|wx.ICON_INFORMATION)
 
-    def printGroups(self):        
-        self.groups = self.vk.groups.get(extended=1)
+    def loadGroups(self, count, i):        
+        tmp = self.vk.groups.get(extended=1, count=count, offset=count*i)['items']
+        self.groups['items'].extend(tmp)
+        if len(tmp) == count:
+            i += 1
+            self.loadGroups(count, i)
+    
+    def printGroups(self):                  
+        self.loadGroups(1000, 0)
         self.groups['items'].insert(0, {'name': (self.user['first_name']+' '+self.user['last_name']), 'id': None})
         self.panelLeft.addText([group['name'] for group in self.groups['items']], clickEvent=self.groupClick)
 
@@ -154,9 +171,9 @@ class Frame(wx.Frame):
         self.checkUploadBtn()
         
     def get_album_info(self, album):
-        return album['title']+', '+str(album['size'])+' photos, created '+datetime.datetime.fromtimestamp(album['created']).strftime('%d.%m.%Y %H:%M')
+        return album['title']+', '+str(album['size'])+' photos, created '+pretty_time(album['created'])
 
-    def printAlbums(self, group_id):    
+    def printAlbums(self, group_id):
         try:
             if group_id is None:
                 self.albums = self.vk.photos.getAlbums()
@@ -193,9 +210,7 @@ class Frame(wx.Frame):
         self.checkUploadBtn()
         
     def startUpload(self, event):
-        t = threading.Thread(target=self.uploadPhotos, args=(self.files, self.group_id, self.album_id, self.upload, self.filesize_total, self.SetStatusText))
-        t.daemon = True
-        t.start()
+        startDaemon(self.uploadPhotos, (self.files, self.group_id, self.album_id, self.upload, self.filesize_total, self.SetStatusText))
 
     def checkUploadBtn(self):
         if self.group_id != False and self.album_id != False and len(self.files) != 0 and self.loading == False:
@@ -211,7 +226,7 @@ class Frame(wx.Frame):
                 message_text = album['title']
         for group in self.groups['items']:
             if group['id'] == group_id:
-                message_text +=' in '+group['name']        
+                message_text +=' in '+group['name']
         files_total = len(files)
         files_loaded = 0
         filesize_loaded = 0
@@ -219,6 +234,7 @@ class Frame(wx.Frame):
         time_start = time.time()        
         for file in files:
             try:
+                time_runned = time.time()-time_start
                 filesize_loaded+=file[1]
                 photo = upload.photo(
                     file[0],
@@ -226,21 +242,36 @@ class Frame(wx.Frame):
                     group_id = group_id
                 )
             except BaseException as e:
-                error_files.append(file)
+                error_files.append([
+                    file[0],
+                    pretty_time(time.time())
+                ])
                 logEvent('Uploading error: '+file[0])
             else:
-                files_loaded += len(photo)
-                time_runned = time.time()-time_start
+                files_loaded += len(photo)                
                 logEvent('Uploaded %.i/%.i files, %.1f minutes left' %(files_loaded, files_total, (time_runned*filesize_total/filesize_loaded-time_runned)/60))
         success_text = 'Uploaded %.i/%.i files in %.1f minutes to ' %(files_loaded, files_total, time_runned/60)
+        if len(error_files):
+            message_text += ', see errors in error_log.txt'
+            error_text = ''
+            for error in error_files:
+                error_text += error[1]+' '+error[0]+'\r\n'
+            try:
+                with codecs.open('error_log.txt', 'w', 'utf-8') as file:
+                    file.write(error_text)
+            except BaseException as e:
+                print 'error', e
+                
         wx.MessageBox(success_text+message_text, 'VK Batch Uploader', wx.OK)
         self.loading = False
         self.checkUploadBtn()
         
-if __name__ == '__main__':    
+        
+if __name__ == '__main__':
     app = wx.App()
     screen_size=wx.GetDisplaySize()
     frm = Frame(None, title='VK Batch Photo Uploader', size=(screen_size[0]*0.7, screen_size[1]*0.7))
     frm.Show()
     frm.initLogin()
     app.MainLoop()
+    
